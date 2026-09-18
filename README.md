@@ -1,6 +1,6 @@
 # MotionGuard — Pose-Based Violence Detection
 
-A command-line tool that watches a video and points out frames where two people are close together and at least one of them is swinging their arms fast. That's the signal this project uses to guess at possible violent interactions. It runs on top of a pretrained pose-estimation model (YOLOv8-pose from Ultralytics), so there's no custom training and no labeled dataset needed anywhere in the pipeline.
+So this is MotionGuard. It's a command-line tool — you feed it a video, and it points out frames where two people are standing close and at least one of them is swinging their arms around fast. That's the whole signal, honestly. Two people close + fast arm movement = maybe something's happening. It's built on top of a pretrained pose model (YOLOv8-pose, from Ultralytics), so no custom training, no labeled dataset, none of that.
 
 **Author:** Rohan Malik
 
@@ -8,19 +8,21 @@ A command-line tool that watches a video and points out frames where two people 
 
 ## 1. How It Works
 
-1. **Pose estimation** — Every frame gets passed through `YOLOv8-pose`, which finds each person in the frame and returns 17 body keypoints per person (shoulders, elbows, wrists, hips, knees, and so on).
+Broadly, six steps.
 
-2. **Tracking** — The model assigns each detected person a persistent ID, so the tool can follow the same person from one frame to the next instead of comparing unrelated detections.
+1. **Pose estimation.** Every frame runs through YOLOv8-pose. It finds each person and spits out 17 keypoints per person — shoulders, elbows, wrists, hips, knees, etc.
 
-3. **Motion score** — For every tracked person, I measure how far their wrists and elbows moved since the *previous* frame, then divide that by their torso length. That keeps the number consistent whether the person is close to the camera or further away.
+2. **Tracking.** Each person gets an ID so I can follow them frame to frame instead of accidentally comparing two different people.
 
-4. **Proximity score** — For every pair of people in a frame, I measure how close together they're standing, normalized the same way by body size, so it doesn't matter how far anyone is from the lens.
+3. **Motion score.** For each tracked person, I check how far their wrists and elbows moved since the last frame, then divide that by torso length. Doing it this way means the number doesn't change just because someone's closer to or farther from the camera.
 
-5. **Flagging** — If two people are close together *and* one of them has a **high** motion score, and that holds for several frames in a row, the tool logs that stretch of video as a possible violent event.
+4. **Proximity score.** Same idea but for pairs of people — how close are they standing, normalized by body size so distance from the lens doesn't throw it off.
 
-6. **Output** — The tool writes out an annotated video (skeletons drawn on everyone, a red "ALERT" border on flagged frames) plus a JSON file logging exactly when each flagged event started and ended.
+5. **Flagging.** Two people close together, one with a high motion score, held for a few frames in a row — that gets logged as a possible violent event.
 
-For the reasoning behind this approach, the assumptions it's making, and what it's genuinely bad at, see [`REPORT.md`](REPORT.md).
+6. **Output.** You get an annotated video (skeletons drawn on, red "ALERT" border when something's flagged) and a JSON file with the timestamps.
+
+More on why I built it this way, what it assumes, and where it breaks down — that's in [`REPORT.md`](REPORT.md).
 
 ---
 
@@ -28,63 +30,61 @@ For the reasoning behind this approach, the assumptions it's making, and what it
 
 ```
 MotionGuard/
-├── detect_violence.py   # main script — runs the detection pipeline
-├── utils.py             # motion score / proximity score helper functions
-├── requirements.txt     # Python dependencies
+├── detect_violence.py   # main script — runs everything
+├── utils.py             # motion/proximity score helpers
+├── requirements.txt
 ├── README.md
 ├── REPORT.md
-└── sample_output/       # example output lands here after a run
+└── sample_output/       # shows up after you run it once
 ```
 
 ---
 
 ## 3. Environment Setup
 
-### Prerequisites
+### You'll need
 
-- Python 3.9 or newer
+- Python 3.9+
 - pip
-- (Recommended) a virtual environment, so this doesn't mess with your other Python projects
+- A virtual env, probably, so this doesn't mess with anything else on your machine
 
-### Step-by-step setup
+### Setup
 
 ```bash
-# 1. Clone the repository
+# clone it
 git clone https://github.com/rohanmalik352/MotionGuard.git
 cd MotionGuard
 
-# 2. Create and activate a virtual environment
+# venv
 python3 -m venv venv
-source venv/bin/activate        # On Windows: venv\Scripts\activate
+source venv/bin/activate        # Windows: venv\Scripts\activate
 
-# 3. Install dependencies
+# install stuff
 pip install -r requirements.txt
 ```
 
-The first time you run the script, `ultralytics` will automatically download the pretrained `yolov8n-pose.pt` weights (~7 MB) — no manual download needed, but you'll need an internet connection for that first run.
+First run, ultralytics grabs the yolov8n-pose.pt weights on its own (~7 MB). Nothing you need to do manually, just be online for that first run.
 
 ---
 
-## 4. Running the Project
-
-### Basic usage
+## 4. Running It
 
 ```bash
 python detect_violence.py --source path/to/input_video.mp4
 ```
 
-This produces:
+You'll get:
 
-- `output/annotated_output.mp4` — the original video with skeletons drawn on every detected person, and a red "ALERT" border on any frame that triggered a flag
-- `output/events.json` — a log of the start/end time (in seconds) of every flagged event
+- `output/annotated_output.mp4` — skeletons on everyone, red border on flagged frames
+- `output/events.json` — when each flagged event started and ended
 
-### Using a webcam instead of a file
+### Webcam works too
 
 ```bash
 python detect_violence.py --source 0
 ```
 
-### Full list of options
+### Every option
 
 ```bash
 python detect_violence.py \
@@ -99,16 +99,16 @@ python detect_violence.py \
 
 | Argument                | Default                       | Meaning                                                                 |
 |-------------------------|--------------------------------|--------------------------------------------------------------------------|
-| `--source`              | *(required)*                   | Path to the input video, or `0` for webcam                              |
-| `--output`              | `output/annotated_output.mp4`  | Where to save the annotated video                                        |
-| `--log`                 | `output/events.json`           | Where to save the event log                                              |
-| `--model`               | `yolov8n-pose.pt`               | Pretrained pose model to use                                             |
-| `--motion-threshold`    | `1.4`                           | Higher = needs faster arm movement to count as "agitated"                |
-| `--proximity-threshold` | `0.35`                          | Higher = people have to be closer together to count as "interacting"     |
-| `--consecutive-frames`  | `5`                             | How many frames in a row the condition must hold before it's logged      |
-| `--conf`                | `0.4`                           | YOLO's confidence threshold for detecting a person at all                |
+| `--source`              | *(required)*                   | Video path, or `0` for webcam                                           |
+| `--output`              | `output/annotated_output.mp4`  | Annotated video save location                                            |
+| `--log`                 | `output/events.json`           | Event log save location                                                  |
+| `--model`               | `yolov8n-pose.pt`               | Which pretrained pose model to use                                       |
+| `--motion-threshold`    | `1.4`                           | Higher = needs faster movement to count as "agitated"                    |
+| `--proximity-threshold` | `0.35`                          | Higher = people need to be closer to count as "interacting"              |
+| `--consecutive-frames`  | `5`                             | How many frames in a row before it logs                                  |
+| `--conf`                | `0.4`                           | YOLO's confidence cutoff for detecting a person                          |
 
-### Example output log (`events.json`)
+### What the log looks like
 
 ```json
 {
@@ -125,28 +125,28 @@ python detect_violence.py \
 
 ---
 
-## 5. Tuning Tips
+## 5. Tuning
 
-- **Getting too many false alarms?** Raise `--motion-threshold` and/or `--proximity-threshold`.
-- **Missing real events?** Lower those same thresholds, or reduce `--consecutive-frames` — though expect more noise if you do.
-- The defaults here were picked by watching test footage, not by tuning against a labeled dataset, so they're a starting point, not a guarantee. Your camera angle, distance, and lighting will all affect what works best — see [`REPORT.md`](REPORT.md) for more on that trade-off.
+Too many false alarms? Bump up `--motion-threshold` or `--proximity-threshold`, or both. Missing real events instead? Go the other way — lower those, or drop `--consecutive-frames`. Just know that'll bring more noise with it.
+
+Honestly, I picked these defaults by eyeballing test footage, not by tuning against any labeled data, so don't treat them as gospel. Your camera angle, how far away it is, the lighting — all of that changes what actually works. More on this trade-off in [`REPORT.md`](REPORT.md).
 
 ---
 
 ## 6. Notes
 
-- This is a **rule-based heuristic**, not a trained violence classifier. It's meant to be simple and explainable, not maximally accurate.
-- It can and will trigger on **non-violent** fast, close-contact motion — hugging, dancing, sports, playful roughhousing. That's a known limitation, not a bug.
-- Tested on Python 3.10, across macOS, Linux, and Windows.
+- This isn't a trained violence classifier. It's a rule-based heuristic — simple, explainable, not super accurate. That's on purpose.
+- It'll flag stuff that isn't violent too. Hugging, dancing, sports, roughhousing with your friends — all of that can trigger it. That's a real limitation, not something I overlooked.
+- I tested it on Python 3.10, on macOS, Linux, and Windows.
 
 ---
 
 ## Acknowledgments
 
-Built on top of [Ultralytics YOLOv8-pose](https://docs.ultralytics.com/tasks/pose/) for pose estimation and tracking, [OpenCV](https://opencv.org/) for video I/O, and [NumPy](https://numpy.org/) for the underlying math. None of those projects are affiliated with this one — just used here as pretrained/off-the-shelf tools.
+Runs on Ultralytics YOLOv8-pose for pose estimation and tracking, OpenCV for video I/O, NumPy for the math. None of those projects have anything to do with mine — just tools I used off the shelf.
 
 ## Author
 
 **Rohan Malik**
-Course: Computer Vision (CSE3010)
-Project: MotionGuard — submitted as an evaluated course project.
+Computer Vision (CSE3010)
+MotionGuard — course project.
